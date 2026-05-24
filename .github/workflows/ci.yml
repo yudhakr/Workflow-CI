@@ -1,0 +1,187 @@
+name: MLflow CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12.7"
+  MLFLOW_TRACKING_URI: "http://127.0.0.1:5000"
+
+jobs:
+  mlflow-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ==========================================================
+      # STEP 1: Set up job
+      # ==========================================================
+      - name: Set up job
+        run: echo "Starting MLflow CI/CD Pipeline"
+
+      # ==========================================================
+      # STEP 2: Checkout repository
+      # ==========================================================
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # ==========================================================
+      # STEP 3: Set up Python
+      # ==========================================================
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # ==========================================================
+      # STEP 4: Check environment
+      # ==========================================================
+      - name: Check Environment
+        run: |
+          python --version
+          pip --version
+          which python
+          echo "MLFLOW_TRACKING_URI=${{ env.MLFLOW_TRACKING_URI }}"
+
+      # ==========================================================
+      # STEP 5: Install dependencies
+      # ==========================================================
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r MLProject/requirements.txt
+
+      # ==========================================================
+      # STEP 6: Run MLflow project
+      # ==========================================================
+      - name: Run MLflow project
+        working-directory: ./MLProject
+        run: |
+          mlflow run . --no-conda
+
+      # ==========================================================
+      # STEP 7: Get latest MLflow run_id (BASIC)
+      # ==========================================================
+      - name: Get latest MLflow run_id
+        id: mlflow_run
+        run: |
+          # Create MLflow runs directory if it doesn't exist
+          mkdir -p mlruns
+
+          # Get the latest run ID from MLflow tracking
+          LATEST_RUN_ID=$(python -c "
+import mlflow
+from mlflow.tracking import MlflowClient
+client = MlflowClient()
+experiments = client.search_experiments()
+if experiments:
+    exp = experiments[0]
+    runs = client.search_runs(experiment_ids=[exp.experiment_id], max_results=1)
+    if runs:
+        print(runs[0].info.run_id)
+    else:
+        print('no-runs')
+else:
+    print('no-experiments')
+" 2>/dev/null || echo "no-runs")
+
+          echo "run_id=$LATEST_RUN_ID" >> $GITHUB_OUTPUT
+          echo "Latest MLflow Run ID: $LATEST_RUN_ID"
+
+      # ==========================================================
+      # STEP 8: Install Python dependencies for Docker (SKILLED)
+      # ==========================================================
+      - name: Install additional Python dependencies
+        run: |
+          pip install mlflow==2.19.0
+
+      # ==========================================================
+      # STEP 9: Upload model artifact to GitHub (SKILLED)
+      # ==========================================================
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-model
+          path: |
+            MLProject/mlruns/
+            MLProject/dataset_preprocessing/
+
+      # ==========================================================
+      # STEP 10: Complete basic job (SKILLED)
+      # ==========================================================
+      - name: Complete basic job
+        if: success()
+        run: echo "MLflow CI Pipeline completed successfully"
+
+      # ==========================================================
+      # STEP 11: Set up Docker Buildx (ADVANCE)
+      # ==========================================================
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ==========================================================
+      # STEP 12: Build Docker Model (ADVANCE)
+      # ==========================================================
+      - name: Build Docker Model
+        id: build_docker
+        run: |
+          # Get the latest MLflow run_id
+          RUN_ID="${{ steps.mlflow_run.outputs.run_id }}"
+
+          if [ "$RUN_ID" != "no-runs" ] && [ "$RUN_ID" != "no-experiments" ]; then
+            echo "Building Docker image from MLflow model (run_id: $RUN_ID)..."
+
+            # Try to build using mlflow models
+            cd MLProject
+            # Create a temporary MLflow model URI
+            echo "Model URI: runs:/$RUN_ID/model"
+            mlflow models build-docker \
+              --model-uri "runs:/$RUN_ID/model" \
+              --name "wine-classification:latest" \
+              --enable-mlserver
+            echo "Docker image built: wine-classification:latest"
+          else
+            echo "No MLflow run found. Building generic Docker image instead."
+            docker build -t wine-classification:latest ./MLProject
+          fi
+
+      # ==========================================================
+      # STEP 13: Log in to Docker Hub (ADVANCE)
+      # ==========================================================
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # ==========================================================
+      # STEP 14: Tag Docker Image (ADVANCE)
+      # ==========================================================
+      - name: Tag Docker Image
+        run: |
+          DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+          if [ -n "$DOCKER_USERNAME" ]; then
+            docker tag wine-classification:latest $DOCKER_USERNAME/wine-classification:latest
+            docker tag wine-classification:latest $DOCKER_USERNAME/wine-classification:${{ github.sha }}
+            echo "Docker image tagged: $DOCKER_USERNAME/wine-classification:latest"
+            echo "Docker image tagged: $DOCKER_USERNAME/wine-classification:${{ github.sha }}"
+          else
+            echo "DOCKER_USERNAME not set. Skipping tag."
+          fi
+
+      # ==========================================================
+      # STEP 15: Push Docker Image to Docker Hub (ADVANCE)
+      # ==========================================================
+      - name: Push Docker Image
+        run: |
+          DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+          if [ -n "$DOCKER_USERNAME" ]; then
+            docker push $DOCKER_USERNAME/wine-classification:latest
+            docker push $DOCKER_USERNAME/wine-classification:${{ github.sha }}
+            echo "Docker image pushed to Docker Hub"
+          else
+            echo "DOCKER_USERNAME not set. Skipping push."
+          fi
