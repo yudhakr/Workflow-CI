@@ -81,7 +81,7 @@ def evaluate(model, X_test, y_test):
 
 
 def save_confusion_matrix(model, X_test, y_test, save_path: str):
-    """Simpan confusion matrix sebagai PNG."""
+    """Simpan confusion matrix dalam bentuk PNG."""
     y_pred = model.predict(X_test)
     fig, ax = plt.subplots(figsize=(8, 6))
     cm = confusion_matrix(y_test, y_pred)
