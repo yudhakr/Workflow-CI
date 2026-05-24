@@ -53,7 +53,7 @@ jobs:
       - name: Run MLflow Project
         working-directory: ./MLProject
         run: |
-          mlflow run . --no-conda
+          mlflow run . --env-manager local
 
       # ==========================================================
       # STEP 6: Upload MLflow Artifacts (SKILLED)
