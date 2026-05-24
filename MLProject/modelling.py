@@ -36,6 +36,10 @@ import mlflow.sklearn
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# MLflow tracking URI: fallback ke local file jika env var tidak diset
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "file:./mlruns")
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+
 DATA_PATH = os.path.join(os.path.dirname(__file__), "dataset_preprocessing", "dataset_preprocessing.csv")
 TARGET_COL = "target"
 TARGET_NAMES = ["class_0", "class_1", "class_2"]
